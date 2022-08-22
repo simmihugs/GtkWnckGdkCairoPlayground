@@ -6,7 +6,8 @@ project('GtkWnckGdkCairoPlayground', 'cpp',
 gtkdep = dependency('gtk+-3.0')
 wnckdep = dependency('libwnck-3.0')
 
-exe = executable('experiment-executable', 'main.cpp',
+exe = executable('experiment-executable',
+  'main.cpp', 
   install : true,
   cpp_args : '-DWNCK_I_KNOW_THIS_IS_UNSTABLE',
   dependencies : [gtkdep, wnckdep])

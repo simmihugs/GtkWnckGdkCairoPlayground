@@ -7,6 +7,8 @@
 #include <gdk/gdkx.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <libwnck/libwnck.h>
+#include <vector>
+#include <algorithm>
 
 const float MAX_WIDTH = 1920.0;
 const float MAX_HEIGHT = 1080.0;
@@ -29,7 +31,116 @@ GdkPixbuf *get_screenshot(WnckWindow *wnck_window);
 static void on_draw(Co *co);
 void create_window_buttons(GtkWidget *container);
 
+std::vector<WnckWindow *> filter_windows_by_workspace(WnckWorkspace *ww, std::vector<WnckWindow *>windows)
+{
+  std::vector<WnckWindow *> windows_from_workspace;
+  std::copy_if(windows.begin(), windows.end(), std::back_inserter(windows_from_workspace), [ww](WnckWindow *w) {
+    WnckWorkspace *w_workspace = wnck_window_get_workspace(w);
+    return w_workspace == ww;
+  });
+  return windows_from_workspace;
+}
+
+class Monitor {
+public:
+  int x;
+  int y;
+  int width;
+  int height;
+  int number;
+
+  Monitor(int x, int y, int width, int height, int number)
+  {
+    this->x = x;
+    this->y = y;
+    this->width = width;
+    this->height = height;
+    this->number = number;
+  }
+
+  bool is_on_monitor(WnckWindow *wnckWindow)
+  {
+    int xp, yp, widthp, heihtp;
+    wnck_window_get_geometry(wnckWindow, &xp, &yp, &widthp, &heihtp);
+    return this->x <= xp && xp < this->x+this->width;
+  }
+
+  void print()
+  {
+    std::cout << "Monitor" << this->number << "\t"
+	      << "\tx: " << this->x
+	      << "\ty: " << this->y
+	      << "\twidth: " << this->width
+	      << "\theight: " << this->height
+	      << std::endl;
+  }
+};
+
+std::vector<WnckWindow *> filter_windows_by_monitor(Monitor *monitor, std::vector<WnckWindow *>windows)
+{
+  std::vector<WnckWindow *> windows_from_monitor;
+  std::copy_if(windows.begin(), windows.end(), std::back_inserter(windows_from_monitor), [monitor](WnckWindow *w) {
+    return monitor->is_on_monitor(w);
+  });
+  return windows_from_monitor;
+}
+
+
 int main(int argc, char **argv)
+{
+  gtk_init(&argc, &argv);
+
+  std::vector<WnckWindow *> windows;
+  
+  WnckScreen *wnck_screen = wnck_screen_get_default();
+  wnck_screen_force_update(wnck_screen);  
+  GList *window_l = wnck_screen_get_windows (wnck_screen);
+  for (; window_l != NULL; window_l = window_l->next) {
+    WnckWindow *wnck_window = WNCK_WINDOW (window_l->data);
+    WnckWorkspace *workspace = wnck_window_get_workspace(wnck_window);
+    if (workspace != NULL) {
+      windows.push_back(wnck_window);
+    }
+  }
+
+  std::vector<Monitor> monitors;
+  
+  GdkScreen *gdk_screen = gdk_screen_get_default();
+  GdkDisplay *gdk_display = gdk_screen_get_display(gdk_screen);
+  gint n = gdk_display_get_n_monitors(gdk_display);
+  GdkRectangle *gdk_rectangle = (GdkRectangle *)malloc(sizeof(GdkRectangle));
+
+  for (int i=0; i<n; ++i) {
+    GdkMonitor *gdk_monitor = gdk_display_get_monitor(gdk_display, i);
+    gdk_monitor_get_geometry(gdk_monitor, gdk_rectangle);
+
+    Monitor monitor = Monitor(gdk_rectangle->x, gdk_rectangle->y, gdk_rectangle->width, gdk_rectangle->height, i);
+    monitors.push_back(monitor);
+  }
+
+  GList *workspaces = wnck_screen_get_workspaces(wnck_screen);
+  for (; workspaces != NULL; workspaces = workspaces->next) {
+    WnckWorkspace *workspace = WNCK_WORKSPACE(workspaces->data);
+    int i = wnck_workspace_get_number(workspace);
+    std::cout << "Workspace " << i << ":\n";
+    auto windows_from_workspace = filter_windows_by_workspace(workspace, windows);
+
+    for (auto monitor : monitors) {
+      auto windows_from_workspace_on_monitor = filter_windows_by_monitor(&monitor, windows_from_workspace);
+      std::cout << "\tMonitor " << monitor.number << ":\t";
+      for (auto window : windows_from_workspace_on_monitor) {
+	auto name = wnck_window_get_class_group_name(window);
+	std::cout << "Name: " << name << "\t";
+      }
+      std::cout << std::endl;
+    }
+    std::cout << std::endl;
+  }
+  
+  return 0;  
+}
+
+int main2(int argc, char **argv)
 {
   gtk_init(&argc, &argv);
 
@@ -230,3 +341,4 @@ GdkPixbuf *get_screenshot(WnckWindow *wnck_window)
   }
   return NULL;
 }
+
