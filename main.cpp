@@ -2,6 +2,7 @@
 #include <cairo.h>
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
@@ -12,7 +13,7 @@
 
 const float MAX_WIDTH = 1920.0;
 const float MAX_HEIGHT = 1080.0;
-const float SCALE_FACTOR = 0.2;
+const float SCALE_FACTOR = 0.1;
 const int ICON_WIDTH = 32;
 const int ICON_HEIGHT = 32;
 
@@ -30,6 +31,8 @@ public:
 GdkPixbuf *get_screenshot(WnckWindow *wnck_window);
 static void on_draw(Co *co);
 void create_window_buttons(GtkWidget *container);
+GtkWidget *get_icon_button(WnckWindow *wnck_window);
+void get_miniature(GtkWidget *window_container, WnckWindow *window);
 
 std::vector<WnckWindow *> filter_windows_by_workspace(WnckWorkspace *ww, std::vector<WnckWindow *>windows)
 {
@@ -85,6 +88,8 @@ std::vector<WnckWindow *> filter_windows_by_monitor(Monitor *monitor, std::vecto
   return windows_from_monitor;
 }
 
+void list_stuff(std::vector<WnckWindow *> windows, std::vector<Monitor> monitors);
+void execute_application(std::vector<WnckWindow *> windows, std::vector<Monitor> monitors);
 
 int main(int argc, char **argv)
 {
@@ -118,6 +123,116 @@ int main(int argc, char **argv)
     monitors.push_back(monitor);
   }
 
+  execute_application(windows, monitors);
+  
+  return 0;  
+}
+
+void execute_application(std::vector<WnckWindow *> windows, std::vector<Monitor> monitors)
+{
+  GtkWindow *window; 
+  { // window setup
+    window = (GtkWindow *)gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_default_size (window, 400, 400);
+    gtk_window_set_position     (window, GTK_WIN_POS_CENTER);
+    gtk_window_set_title        (window, "Drawing");
+
+    g_signal_connect(window, "destroy", gtk_main_quit, NULL);
+  }  
+
+  //Add windows to app
+  GtkWidget *main_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+  // Add representations for Workspaces
+  {
+    WnckScreen *wnck_screen = wnck_screen_get_default();
+    GList *workspaces = wnck_screen_get_workspaces(wnck_screen);
+    for (; workspaces != NULL; workspaces = workspaces->next) {
+      WnckWorkspace *workspace = WNCK_WORKSPACE(workspaces->data);
+      int i = wnck_workspace_get_number(workspace);
+
+      std::string workspace_name;
+      {
+	std::stringstream ss1;
+	ss1 << "Workspace " << i << ":";
+	workspace_name = ss1.str();	
+      }
+      
+      GtkWidget *workspace_label = gtk_label_new(workspace_name.c_str());
+      gtk_label_set_xalign(GTK_LABEL(workspace_label), 0.0);
+      
+      GtkWidget *workspace_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+      gtk_container_add(GTK_CONTAINER(workspace_container), workspace_label);
+
+      auto windows_from_workspace = filter_windows_by_workspace(workspace, windows);
+      for (auto monitor : monitors) {
+	GtkWidget *monitor_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        GtkWidget *monitor_sub_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+
+	std::string monitor_name;
+	{
+	 std::stringstream ss2;
+	 ss2 << "Monitor " << monitor.number << ":";
+	 monitor_name = ss2.str();
+	}
+	
+	GtkWidget *monitor_label = gtk_label_new(monitor_name.c_str());
+	gtk_label_set_xalign(GTK_LABEL(monitor_label), 0.0);
+
+	GtkWidget *spacer = gtk_label_new("\t");
+	gtk_container_add(GTK_CONTAINER(monitor_sub_container), spacer);
+	gtk_container_add(GTK_CONTAINER(monitor_sub_container), monitor_label);		
+	gtk_container_add(GTK_CONTAINER(monitor_container), monitor_sub_container);
+	auto windows_from_workspace_on_monitor = filter_windows_by_monitor(&monitor, windows_from_workspace);
+	
+	GtkWidget *windows_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	GtkWidget *spacer2 = gtk_label_new("\t\t");
+	gtk_container_add(GTK_CONTAINER(windows_container), spacer2);
+	for (auto window : windows_from_workspace_on_monitor) {
+	  auto name = wnck_window_get_class_group_name(window);
+	  GtkWidget *window_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+	  GtkWidget *title_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	  gtk_container_add(GTK_CONTAINER(title_container), get_icon_button(window)); 
+	  gtk_container_add(GTK_CONTAINER(title_container), gtk_label_new(name));
+	  gtk_container_add(GTK_CONTAINER(title_container), gtk_button_new_with_label("X"));	  
+	  
+          gtk_container_add(GTK_CONTAINER(window_container), title_container);
+	  get_miniature(window_container, window);
+
+          gtk_container_add(GTK_CONTAINER(windows_container), window_container);
+	}
+
+	gtk_container_add(GTK_CONTAINER(monitor_container), windows_container);
+
+	gtk_container_add(GTK_CONTAINER(workspace_container), monitor_container);
+      }
+      gtk_container_add(GTK_CONTAINER(main_container), workspace_container);
+    }
+  }
+  
+  gtk_container_add(GTK_CONTAINER(window), main_container);
+  
+  gtk_widget_show_all((GtkWidget *)window);
+  gtk_main();
+}
+
+void get_miniature(GtkWidget *window_container, WnckWindow *window)
+{
+  GtkDrawingArea *drawingArea;
+  {
+    drawingArea = (GtkDrawingArea *)gtk_drawing_area_new();
+    gtk_widget_set_size_request((GtkWidget *)drawingArea, MAX_WIDTH*SCALE_FACTOR, MAX_HEIGHT*SCALE_FACTOR);
+    gtk_container_add(GTK_CONTAINER(window_container), (GtkWidget *)drawingArea);
+
+    Co *co = new Co(window, (GtkWidget *)drawingArea);
+    g_signal_connect_swapped((GtkWidget *)drawingArea, "draw", G_CALLBACK(on_draw), co);    
+  }  
+}
+
+void list_stuff(std::vector<WnckWindow *> windows, std::vector<Monitor> monitors)
+{
+  WnckScreen *wnck_screen = wnck_screen_get_default();
   GList *workspaces = wnck_screen_get_workspaces(wnck_screen);
   for (; workspaces != NULL; workspaces = workspaces->next) {
     WnckWorkspace *workspace = WNCK_WORKSPACE(workspaces->data);
@@ -135,9 +250,7 @@ int main(int argc, char **argv)
       std::cout << std::endl;
     }
     std::cout << std::endl;
-  }
-  
-  return 0;  
+  }  
 }
 
 int main2(int argc, char **argv)
@@ -341,4 +454,3 @@ GdkPixbuf *get_screenshot(WnckWindow *wnck_window)
   }
   return NULL;
 }
-
